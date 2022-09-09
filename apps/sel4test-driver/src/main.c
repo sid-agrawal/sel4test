@@ -400,105 +400,13 @@ void sel4test_run_tests(struct driver_env *e)
     sel4test_stop_tests(SUCCESS, tests_done, tests_failed, num_tests + 1, skipped_tests);
 }
 
-void test_starting_new_process(void) {
-    int error = 0;
-    int EP_BADGE = 0x6a;
-
-    simple_t *simple = &env.simple;
-    vspace_t *vspace = &env.vspace;
-    assert(vspace != NULL);
-    assert(vspace->data != NULL);
-    vka_t *vka = &env.vka;
-    sel4utils_process_t new_process;
-
-    ccnt_t start, end;
-    sel4bench_init();
-    SEL4BENCH_READ_CCNT(start);
-
-    sel4utils_process_config_t config = process_config_default_simple(simple, "hello", 255);
-    error = sel4utils_configure_process_custom(&new_process, vka, vspace, config);
-    assert(error == 0);
-
-
-    /* give the new process's thread a name */
-    NAME_THREAD(new_process.thread.tcb.cptr, "dynamic-3: process_2");
-
-    /* create an endpoint */
-    vka_object_t ep_object = {0};
-    error = vka_alloc_endpoint(vka, &ep_object);
-    ZF_LOGF_IFERR(error, "Failed to allocate new endpoint object.\n");
-
-    /*
-     * make a badged endpoint in the new process's cspace.  This copy
-     * will be used to send an IPC to the original cap
-     */
-
-    cspacepath_t ep_cap_path;
-    seL4_CPtr new_ep_cap = 0;
-    vka_cspace_make_path(vka, ep_object.cptr, &ep_cap_path);
-
-    
-    /* TASK 4: copy the endpont cap and add a badge to the new cap */
-    new_ep_cap = sel4utils_mint_cap_to_process(&new_process, ep_cap_path,
-                                               seL4_AllRights, EP_BADGE);
-    seL4_Word argc = 1;
-    char string_args[argc][WORD_STRING_SIZE];
-    char* argv[argc];
-    sel4utils_create_word_args(string_args, argv, argc, new_ep_cap);
-
-    error = sel4utils_spawn_process_v(&new_process, vka, vspace, argc, (char**) &argv, 1);
-    ZF_LOGF_IFERR(error, "Failed to spawn and start the new thread.\n"
-                  "\tVerify: the new thread is being executed in the root thread's VSpace.\n"
-                  "\tIn this case, the CSpaces are different, but the VSpaces are the same.\n"
-                  "\tDouble check your vspace_t argument.\n");
-
-    /*
-     * now wait for a message from the new process, then send a reply back
-     */
-
-    seL4_Word sender_badge = 0;
-    seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 0);
-    seL4_Word msg;
-
-    tag = seL4_Recv(ep_cap_path.capPtr, &sender_badge);
-   /* make sure it is what we expected */
-    ZF_LOGF_IF(sender_badge != EP_BADGE,
-               "The badge we received from the new thread didn't match our expectation.\n");
-
-    ZF_LOGF_IF(seL4_MessageInfo_get_length(tag) != 1,
-               "Response data from the new process was not the length expected.\n"
-               "\tHow many registers did you set with seL4_SetMR within the new process?\n");
-
-
-    /* get the message stored in the first message register */
-    end = seL4_GetMR(0);
-    printf("root-task: \tStart: %010ld\n\t, End: %ld\n\t, Diff: %ld\n",
-           start, end, end - start);
-
-    /* modify the message */
-    seL4_SetMR(0, ~msg);
-
-    
-    /* TASK 7: send the modified message back */
-    /* hint 1: seL4_ReplyRecv()
-     * seL4_MessageInfo_t seL4_ReplyRecv(seL4_CPtr dest, seL4_MessageInfo_t msgInfo, seL4_Word *sender)
-     * @param dest The capability to be invoked.
-     * @param msgInfo The messageinfo structure for the IPC.  This specifies information about the message to send (such as the number of message registers to send) as the Reply part.
-     * @param sender The badge of the endpoint capability that was invoked by the sender is written to this address. This is a result of the Wait part.
-     * @return A seL4_MessageInfo_t structure.  This is a result of the Wait part.
-     *
-     * hint 2: seL4_MessageInfo_t is generated during build.
-     * hint 3: use the badged endpoint cap that you used for Call
-     */
-    
-    seL4_ReplyRecv(ep_cap_path.capPtr, tag, &sender_badge);
-}
 void *main_continued(void *arg UNUSED)
 {
 
     /* Print welcome banner. */
     printf("root-task: About to start a process.\n");
-    test_starting_new_process();
+    // test_starting_new_process(&env);
+    test_starting_new_threads(&env);
     
 
 
