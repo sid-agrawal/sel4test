@@ -72,7 +72,7 @@ void test_starting_new_process(driver_env_t env) {
     /* create an endpoint */
     vka_object_t ep_object = {0};
     error = vka_alloc_endpoint(vka, &ep_object);
-    ZF_LOGF_IFERR(error, "Failed to allocate new endpoint object.\n");
+    assert(error == 0);
 
     /*
      * make a badged endpoint in the new process's cspace.  This copy
@@ -93,12 +93,9 @@ void test_starting_new_process(driver_env_t env) {
     sel4utils_create_word_args(string_args, argv, argc, new_ep_cap);
 
     error = sel4utils_spawn_process_v(&new_process, vka, vspace, argc, (char**) &argv, 1);
-    ZF_LOGF_IFERR(error, "Failed to spawn and start the new thread.\n"
-                  "\tVerify: the new thread is being executed in the root thread's VSpace.\n"
-                  "\tIn this case, the CSpaces are different, but the VSpaces are the same.\n"
-                  "\tDouble check your vspace_t argument.\n");
+    assert(error == 0);
 
-    /*
+   /*
      * now wait for a message from the new process, then send a reply back
      */
 
@@ -107,12 +104,9 @@ void test_starting_new_process(driver_env_t env) {
 
     tag = seL4_Recv(ep_cap_path.capPtr, &sender_badge);
    /* make sure it is what we expected */
-    ZF_LOGF_IF(sender_badge != EP_BADGE,
-               "The badge we received from the new thread didn't match our expectation.\n");
+    assert(sender_badge == EP_BADGE);
 
-    ZF_LOGF_IF(seL4_MessageInfo_get_length(tag) != 1,
-               "Response data from the new process was not the length expected.\n"
-               "\tHow many registers did you set with seL4_SetMR within the new process?\n");
+    assert(seL4_MessageInfo_get_length(tag) == 1);
 
 
     /* get the message stored in the first message register */
