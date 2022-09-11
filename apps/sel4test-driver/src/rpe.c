@@ -142,135 +142,113 @@ void test_starting_new_process(driver_env_t env) {
 
 
 
-int new_thread(seL4_Word mains_ep, seL4_Word arg1){
-
-    assert(mains_ep != 0);
-    ccnt_t end;
+int new_thread(seL4_Word mains_ep, seL4_Word arg1)
+{
+    ccnt_t end, start;
     SEL4BENCH_READ_CCNT(end);
-    printf("hello: __sel4_ipc_buffer(%p): %p\n", &__sel4_ipc_buffer, __sel4_ipc_buffer);
+
+    seL4_SetIPCBuffer((seL4_IPCBuffer*)arg1);
+    assert(mains_ep != 0);
+    // printf("hello: __sel4_ipc_buffer(%p): %p\n", &__sel4_ipc_buffer, __sel4_ipc_buffer);
 
     /*
-     * send a message to our parent, and wait for a reply
+     * send a message to our parent with our start time , and wait for a reply
      */
 
     /* set the data to send. We send it in the first message register */
     seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_SetMR(0, end);
 
+    SEL4BENCH_READ_CCNT(start);
     tag = seL4_Call(mains_ep, tag);
-
+    SEL4BENCH_READ_CCNT(end);
     seL4_Word msg = seL4_GetMR(0);
 
-    printf("hello: got a reply: %lu\n", msg);
+    printf("hello: Received Word %lx\n", msg);
+    printf("hello: IPC-Same-AS RTT: %lu\n", end - start);
 
     while(1); // As I do not know how to cleanly exit the thread, I just loop forever
 }
 
-void test_starting_new_threads(driver_env_t env) {
-
-
-    int error = 0;
+void test_starting_new_threads(driver_env_t env) 
+{
     int EP_BADGE = 0x6a;
-
-    simple_t *simple = &env->simple;
+    vka_t *vka = &env->vka;
+    vka_object_t tcb;
     vspace_t *vspace = &env->vspace;
     assert(vspace != NULL);
-    assert(vspace->data != NULL);
-    vka_t *vka = &env->vka;
-    seL4_CNode root_cnode = simple_get_cnode(&env->simple);
-    size_t cnode_size_bits = simple_get_cnode_size_bits(&env->simple);
-
-    sel4utils_process_t new_process;
 
     ccnt_t start, end;
     sel4bench_init();
     SEL4BENCH_READ_CCNT(start);
 
-    /* Setup the Thread */
-    helper_thread_t thread;
-
-
-    error = vka_alloc_endpoint(&env->vka, &thread.local_endpoint);
+    vka_object_t ep_object = {0};
+    int error = vka_alloc_endpoint(&env->vka, &ep_object);
+    assert(error == 0);
+    
+    seL4_CNode root_cnode = simple_get_cnode(&env->simple);
+    size_t cnode_size_bits = simple_get_cnode_size_bits(&env->simple);
+    error = vka_alloc_tcb(vka, &tcb);
     assert(error == 0);
 
-    size_t stack_pages = BYTES_TO_4K_PAGES(CONFIG_SEL4UTILS_STACK_SIZE);
-    thread.is_process = false;
-    thread.fault_endpoint = env->endpoint;
-    seL4_Word data = api_make_guard_skip_word(seL4_WordBits - cnode_size_bits);
-    sel4utils_thread_config_t config = thread_config_default(&env->simple, root_cnode, data, env->endpoint, 244);
-    config = thread_config_stack_size(config, stack_pages);
-    error = sel4utils_configure_thread_config(&env->vka, &env->vspace, &env->vspace,
-                                              config, &thread.thread);
-    assert(error == 0);
-    //start_helper(env, &thread, new_thread, 0, 0, 0, 0);
+    seL4_CPtr vspace_root  = vspace->get_root(vspace); // root page table
+    assert(vspace_root != 0);
+    
+    seL4_CPtr ipc_buffer_frame;
+    void *ipc_buffer_addr =  vspace_new_ipc_buffer(vspace, &ipc_buffer_frame);
+    assert(ipc_buffer_addr != NULL);
 
-    // sel4utils_create_word_args(thread.args_strings, thread.args, HELPER_THREAD_TOTAL_ARGS,
-//                                0xdead, 0xbeef);
+    void *stack_top = vspace_new_sized_stack(vspace, 8);
+    assert(stack_top != NULL);
 
-    // from sel4utils_start_thread
-    seL4_UserContext context = {0};
-    size_t context_size = sizeof(seL4_UserContext) / sizeof(seL4_Word);
+    void *tls_base = stack_top;
+    stack_top -= 0x100;
 
-    size_t tls_size = sel4runtime_get_tls_size();
-    sel4utils_thread_t th = thread.thread;
-    /* make sure we're not going to use too much of the stack */
-    if (tls_size > th.stack_size * PAGE_SIZE_4K / 8) {
-        ZF_LOGE("TLS would use more than 1/8th of the application stack %zu/%zu", tls_size, th.stack_size);
-        return;
-    }
-    uintptr_t tls_base = (uintptr_t)th.initial_stack_pointer - tls_size;
-    uintptr_t tp = (uintptr_t)sel4runtime_write_tls_image((void *)tls_base);
-    seL4_IPCBuffer *ipc_buffer_addr = (void *)th.ipc_buffer_addr;
-    sel4runtime_set_tls_variable(tp, __sel4_ipc_buffer, ipc_buffer_addr);
-
-    uintptr_t aligned_stack_pointer = ALIGN_DOWN(tls_base, STACK_CALL_ALIGNMENT);
-
-    // context.x0 = thread.local_endpoint.cptr;
-    // context.x1 = 0xbeef;
-
-    // error = sel4utils_arch_init_context(new_thread,
-    //                                     (void *)aligned_stack_pointer, /* stack_top */
-    //                                     &context);
-    error = sel4utils_arch_init_context_with_args((sel4utils_thread_entry_fn)new_thread,
-                                                  (void*)thread.local_endpoint.cptr,
-                                                  (void*)0xbeef,
-                                                  NULL,
-                                                  false,
-                                                  (void *)aligned_stack_pointer, /* stack_top */
-                                                  &context,
-                                                  NULL,
-                                                  NULL,
-                                                  NULL);
+    error = seL4_TCB_Configure(tcb.cptr,
+                               seL4_CapNull,             // fault endpoint
+                               root_cnode,               // root cnode
+                               0,                        // root cnode size
+                               vspace_root,
+                               0,                        // domain
+                               (seL4_Word)ipc_buffer_addr,
+                               ipc_buffer_frame);
     assert(error == 0);
 
-    error = seL4_TCB_WriteRegisters(th.tcb.cptr, false, 0, context_size, &context);
+    error = seL4_TCB_SetPriority(tcb.cptr, seL4_CapInitThreadTCB, 254);
     assert(error == 0);
 
-    error = seL4_TCB_SetTLSBase(th.tcb.cptr, tp);
+                                
+    error = seL4_TCB_SetTLSBase(tcb.cptr, (seL4_Word)stack_top);
     assert(error == 0);
 
-    error = seL4_TCB_Resume(th.tcb.cptr);
+    stack_top -= 0x100;
+
+     UNUSED seL4_UserContext regs = {0};
+    error = seL4_TCB_ReadRegisters(tcb.cptr,
+                                       0, 0, sizeof(regs) / sizeof(seL4_Word), &regs);
     assert(error == 0);
+    sel4utils_arch_init_local_context((sel4utils_thread_entry_fn )new_thread,
+                                      (void *)ep_object.cptr,
+                                      (void *)ipc_buffer_addr,
+                                      NULL,
+                                      stack_top, &regs);
+    assert(error == 0);
+
+    error = seL4_TCB_WriteRegisters(tcb.cptr, 0, 0, sizeof(regs)/sizeof(seL4_Word), &regs);
+    assert(error == 0);
+
+
+    // resume the new thread
+    error = seL4_TCB_Resume(tcb.cptr);
 
     /* Wait for the thread to finish */
-
     seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 0);
-    seL4_Word msg;
-
-    tag = seL4_Recv(thread.local_endpoint.cptr, NULL);
-    // ZF_LOGF_IF(seL4_MessageInfo_get_length(tag) != 1,
-    //            "Response data from the new process was not the length expected.\n"
-    //            "\tHow many registers did you set with seL4_SetMR within the new process?\n");
-
-
-    /* get the message stored in the first message register */
+    tag = seL4_Recv(ep_object.cptr, NULL);
     end = seL4_GetMR(0);
-    printf("root-task: \tStart: %010ld\n\t, End: %ld\n\t, Diff: %ld\n",
-           start, end, end - start);
 
-    printf("root_task: __sel4_ipc_buffer(%p): %p\n", &__sel4_ipc_buffer, __sel4_ipc_buffer);
-    /* modify the message */
-    seL4_SetMR(0, ~msg);
+    /* Send back a funny response */
+    seL4_SetMR(0, 0xdeadbeef);
 
-    seL4_ReplyRecv(thread.local_endpoint.cptr, tag, NULL);
+    seL4_ReplyRecv(ep_object.cptr, tag, NULL);
+    printf("root-task: Time to start new thread: %lu\n", end-start);
 }
