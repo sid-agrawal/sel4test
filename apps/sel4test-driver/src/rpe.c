@@ -104,7 +104,6 @@ void test_starting_new_process(driver_env_t env) {
 
     seL4_Word sender_badge = 0;
     seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 0);
-    seL4_Word msg;
 
     tag = seL4_Recv(ep_cap_path.capPtr, &sender_badge);
    /* make sure it is what we expected */
@@ -118,26 +117,11 @@ void test_starting_new_process(driver_env_t env) {
 
     /* get the message stored in the first message register */
     end = seL4_GetMR(0);
-    printf("root-task: \tStart: %010ld\n\t, End: %ld\n\t, Diff: %ld\n",
-           start, end, end - start);
+    seL4_SetMR(0, 0xdeadbeef);
 
-    /* modify the message */
-    seL4_SetMR(0, ~msg);
-
-    
-    /* TASK 7: send the modified message back */
-    /* hint 1: seL4_ReplyRecv()
-     * seL4_MessageInfo_t seL4_ReplyRecv(seL4_CPtr dest, seL4_MessageInfo_t msgInfo, seL4_Word *sender)
-     * @param dest The capability to be invoked.
-     * @param msgInfo The messageinfo structure for the IPC.  This specifies information about the message to send (such as the number of message registers to send) as the Reply part.
-     * @param sender The badge of the endpoint capability that was invoked by the sender is written to this address. This is a result of the Wait part.
-     * @return A seL4_MessageInfo_t structure.  This is a result of the Wait part.
-     *
-     * hint 2: seL4_MessageInfo_t is generated during build.
-     * hint 3: use the badged endpoint cap that you used for Call
-     */
     
     seL4_ReplyRecv(ep_cap_path.capPtr, tag, &sender_badge);
+    printf("root-task: Time to start new process: %lu\n", end-start);
 }
 
 

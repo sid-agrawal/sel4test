@@ -16,9 +16,8 @@ int main(int argc, char **argv)
 {
 //    sel4muslcsys_register_stdio_write_fn(write_buf);
 
-    ccnt_t end;
+    ccnt_t end, start;
     SEL4BENCH_READ_CCNT(end);
-    printf("Hello: End time was: %lu\n", end);
 
     /*
      * send a message to our parent, and wait for a reply
@@ -32,11 +31,14 @@ int main(int argc, char **argv)
     ZF_LOGF_IF(argc < 1,
                "Missing arguments.\n");
     seL4_CPtr ep = (seL4_CPtr) atol(argv[0]);
+    SEL4BENCH_READ_CCNT(start);
     tag = seL4_Call(ep, tag);
+    SEL4BENCH_READ_CCNT(end);
 
     seL4_Word msg = seL4_GetMR(0);
 
-    // printf("hello: got a reply: %lu\n", msg);
+    printf("hello: got a reply: %lu\n", msg);
+    printf("hello: IPC-Across-AS RTT: %lu\n", end - start);
 
     return 0;
 }
