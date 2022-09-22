@@ -405,8 +405,8 @@ void *main_continued(void *arg UNUSED)
 
     /* Print welcome banner. */
     printf("root-task: About to start a process.\n");
-    test_starting_new_process(&env);
-    //test_starting_new_threads(&env);
+  //  test_starting_new_process(&env);
+    test_starting_new_threads(&env);
     
 
 

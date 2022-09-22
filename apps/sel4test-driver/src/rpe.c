@@ -45,6 +45,26 @@
 
 #include <sel4platsupport/io.h>
 #include <sel4bench/arch/sel4bench.h>
+#include <math.h>
+
+void calculateSD(float data[], float *mean, float *sd,
+                 int start, int end)
+{
+    int i;
+
+    int n = end - start +1;
+    float sum = 0.0;
+    for (i = 1; i < n; ++i) {
+        sum += data[i];
+    }
+    *mean = sum / n;
+    for (i = start; i < end; ++i) {
+        *sd += pow(data[i] - *mean, 2);
+    }
+    *sd = *sd / n;
+    *sd = sqrt(*sd);
+    return;
+}
 
 void test_starting_new_process(driver_env_t env) {
     int error = 0;
@@ -106,24 +126,29 @@ void test_starting_new_process(driver_env_t env) {
    /* make sure it is what we expected */
     assert(sender_badge == EP_BADGE);
 
-    assert(seL4_MessageInfo_get_length(tag) == 1);
+    // assert(seL4_MessageInfo_get_length(tag) == 1);
 
 
+    tag = seL4_MessageInfo_new(0, 0, 0, 1);
     /* get the message stored in the first message register */
-    end = seL4_GetMR(0);
-    seL4_SetMR(0, 0xdeadbeef);
+    seL4_SetMR(0, start);
 
     
     seL4_ReplyRecv(ep_cap_path.capPtr, tag, &sender_badge);
-    printf("root-task: Time to start new process: %lu\n", end-start);
+
+
+    while (1) {
+        seL4_ReplyRecv(ep_cap_path.capPtr, tag, &sender_badge);
+    }
 }
 
 
 
 int new_thread(seL4_Word mains_ep, seL4_Word arg1)
 {
-    ccnt_t end, start;
-    SEL4BENCH_READ_CCNT(end);
+    ccnt_t creation_end, creation_start;
+    ccnt_t ctx_end, ctx_start;
+    SEL4BENCH_READ_CCNT(creation_end);
 
     seL4_SetIPCBuffer((seL4_IPCBuffer*)arg1);
     assert(mains_ep != 0);
@@ -134,16 +159,30 @@ int new_thread(seL4_Word mains_ep, seL4_Word arg1)
      */
 
     /* set the data to send. We send it in the first message register */
-    seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 1);
-    seL4_SetMR(0, end);
+    seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 0);
 
-    SEL4BENCH_READ_CCNT(start);
     tag = seL4_Call(mains_ep, tag);
-    SEL4BENCH_READ_CCNT(end);
-    seL4_Word msg = seL4_GetMR(0);
+    creation_start = seL4_GetMR(0);
 
-    printf("hello: Received Word %lx\n", msg);
-    printf("hello: IPC-Same-AS RTT: %lu\n", end - start);
+    printf("test_fun: creationg time %llu\n",
+     (creation_end - creation_start)/1000);
+
+    float data[1000];
+    printf("test_func_die: Cross AS IPC Time\n");
+    int count = 1000;
+    int i = 0;
+    for(int i = 0; i < count; i++) {
+
+        tag = seL4_MessageInfo_new(0, 0, 0, 1);
+        SEL4BENCH_READ_CCNT(ctx_start);
+        tag = seL4_Call(mains_ep, tag);
+        SEL4BENCH_READ_CCNT(ctx_end);
+        data[i] = (ctx_end - ctx_start)/2;
+    }
+    
+    float mean, sd;
+    calculateSD(data, &mean, &sd, 1, 99);
+    printf("MEAN: %f, SD: %f \n", mean/1000, sd/1000);
 
     while(1); // As I do not know how to cleanly exit the thread, I just loop forever
 }
@@ -222,11 +261,14 @@ void test_starting_new_threads(driver_env_t env)
     /* Wait for the thread to finish */
     seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 0);
     tag = seL4_Recv(ep_object.cptr, NULL);
-    end = seL4_GetMR(0);
 
     /* Send back a funny response */
-    seL4_SetMR(0, 0xdeadbeef);
+    seL4_SetMR(0, start);
 
+    tag = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_ReplyRecv(ep_object.cptr, tag, NULL);
-    printf("root-task: Time to start new thread: %lu\n", end-start);
+    
+    while (1) {
+        seL4_ReplyRecv(ep_object.cptr, tag, NULL);
+    }
 }
